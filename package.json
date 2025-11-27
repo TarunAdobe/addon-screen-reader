@@ -1,18 +1,28 @@
 {
-  "name": "addon-screen-reader",
-  "version": "1.8.6",
-  "description": "A Screen Reader Storybook addon",
+  "name": "storybook-screen-reader",
+  "version": "1.0.0",
+  "description": "A Screen Reader Storybook addon for accessibility testing",
   "keywords": [
     "storybook",
+    "storybook-addons",
     "addons",
     "accessibility",
     "a11y",
-    "screen-reader"
+    "screen-reader",
+    "wcag"
   ],
   "publishConfig": {
-    "registry": "https://registry.npmjs.org"
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
   },
-  "repository": "git://github.com/vlaraort/addon-screen-reader.git",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TarunAdobe/addon-screen-reader.git"
+  },
+  "homepage": "https://github.com/TarunAdobe/addon-screen-reader#readme",
+  "bugs": {
+    "url": "https://github.com/TarunAdobe/addon-screen-reader/issues"
+  },
   "files": [
     "dist/**/*",
     "README.md",
@@ -20,7 +30,7 @@
   ],
   "module": "dist/register.js",
   "main": "dist/register.js",
-  "author": "Víctor Lara",
+  "author": "Tarun Tomar",
   "license": "MIT",
   "dependencies": {
     "@babel/preset-env": "^7.13.8",

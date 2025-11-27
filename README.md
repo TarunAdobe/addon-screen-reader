@@ -1,73 +1,101 @@
 # Storybook Screen Reader Addon
 
-[![Storybook Demo](https://raw.githubusercontent.com/storybooks/brand/master/badge/badge-storybook.svg)](https://storybook-screen-reader.netlify.app/?path=/story/example-page--logged-in)
-[![NPM Version](https://img.shields.io/npm/v/addon-screen-reader.svg)](https://www.npmjs.com/package/addon-screen-reader)
-[![Known Vulnerabilities](https://snyk.io/test/github/vlaraort/addon-screen-reader/badge.svg)](https://snyk.io/test/github/vlaraort/addon-screen-reader)
-[![Security Score](https://snyk-widget.herokuapp.com/badge/npm/addon-screen-reader/badge.svg)](https://snyk.io/test/github/vlaraort/addon-screen-reader)
-![Pipeline status](https://github.com/vlaraort/addon-screen-reader/workflows/Release/badge.svg)
-[![Netlify Status](https://api.netlify.com/api/v1/badges/e36d3179-7759-43af-a426-0936026c5c60/deploy-status)](https://app.netlify.com/sites/storybook-screen-reader/deploys)
+[![NPM Version](https://img.shields.io/npm/v/storybook-screen-reader.svg)](https://www.npmjs.com/package/storybook-screen-reader)
 
+A screen reader addon for Storybook that helps developers test accessibility without external screen reader software. It announces focused elements via voice synthesis and/or text display.
 
+![Screen Reader Demo](screenshots/screen-reader-example.gif)
 
-Addon to display a custom screen reader in the addons panel of Storybook. Allows the developers to quickly test their accessibility without need of external screen reader or complex programs.
+## Features
 
-It allows to have separate outputs for voice and text.
-
-![](screenshots/screen-reader-example.gif)
-
-## Disclaimer
-
-This is a starting project with a lot of things to improve.
-
-Only a few use cases of screen readers and keyboard navigation are covered and is not intended to replace a full test with a real screen reader.
-
-This is a personal project, while I am improving myself in accessibility topics, to help me to understand in deep how a screen reader works, and there is no better way than try to build one by myself right? 
+- **Voice Reader** - Uses Web Speech API to announce focused elements
+- **Text Reader** - Displays announcements in the addon panel
+- **Focus Tracking** - Automatically tracks focus changes (Tab, arrow keys, clicks)
+- **Web Component Support** - Works with Shadow DOM and custom elements
+- **ARIA Support** - Reads `aria-label`, `aria-selected`, `aria-checked`, roles, etc.
+- **Story Navigation** - Automatically resets when switching between stories
+- **Storybook 8.x Compatible** - Updated for modern Storybook
 
 ## Installation
 
-Just like any regular NPM package.
-
-Install as a dev dependency:
-
 ```bash
-npm install -d addon-screen-reader
+npm install storybook-screen-reader
 ```
 
 or
 
 ```bash
-yarn add -dev addon-screen-reader
+yarn add storybook-screen-reader
 ```
 
+## Setup
 
-Add the addon to your addons file (usually `.storybook/main.js`)
+Add the addon to your `.storybook/main.js`:
 
-```
+```js
 module.exports = {
-  addons: ['addon-screen-reader'],
+  addons: [
+    // ... other addons
+    'storybook-screen-reader',
+  ],
 };
 ```
 
 ## Usage
 
-- Run the storybook of your project.
-- Navigate to the new "Screen Reader" tab.
-- Enable the voice / text option.
-- Navigate though your page with <kbd>Alt</kbd> + <kbd>Tab</kbd> or <kbd>Option</kbd> + <kbd>Tab</kbd>.
+1. Open Storybook and navigate to any story
+2. Click the **"Screen Reader"** tab in the addons panel
+3. Enable **Voice Reader** and/or **Text Reader**
+4. Navigate through your component:
+   - **Tab** / **Shift+Tab** - Move between focusable elements
+   - **Arrow keys** - Navigate within menus, listboxes, etc.
+   - **Click** - Focus any element
 
+The addon will announce each focused element with its role and accessible name.
 
-## Demo
+## What Gets Announced
 
-The CI integration of this project deploys a demo storybook in netlify, so you can check by yourself.
+| Element | Announcement Example |
+|---------|---------------------|
+| Button | "Button, Submit. Press Space or Enter to activate." |
+| Link | "Link, Learn more. Press Enter to follow." |
+| Checkbox | "Checkbox, Accept terms, not checked." |
+| Menu item | "Menu item, Settings" |
+| Heading | "Heading level 2, Welcome" |
+| Text field | "Text field, Email. Empty." |
 
-[Demo](https://storybook-screen-reader.netlify.app/?path=/story/example-page--logged-in)
+## Supported Elements
 
-## Feedback
+The addon tracks all focusable elements including:
 
-All the feedback is welcome! You can create any issue in the repository and I will reach you ASAP.
+- `<button>`, `<a>`, `<input>`, `<select>`, `<textarea>`
+- Elements with `[tabindex]`
+- Elements with `[role]` attributes
+- Web components with `[focusable]` attribute
+- `<details>`, `<summary>`, `[contenteditable]`
+
+## Limitations
+
+This addon is a development aid, not a replacement for testing with real screen readers like:
+- VoiceOver (macOS/iOS)
+- NVDA (Windows)
+- JAWS (Windows)
+
+Always test with actual assistive technology before shipping.
+
+## Compatibility
+
+- Storybook 8.x
+- React, Vue, Angular, Web Components, HTML
 
 ## Contributing
 
-You want to contribute? yay! 
+Issues and PRs welcome! [GitHub Repository](https://github.com/TarunAdobe/addon-screen-reader)
 
-Just fork this project and open a PR, I will help you in what you need.
+## Credits
+
+Originally created by [Víctor Lara](https://github.com/vlaraort/addon-screen-reader). Updated and maintained by [Tarun Tomar](https://github.com/TarunAdobe).
+
+## License
+
+MIT
