@@ -1,68 +1,10 @@
 import { querySelectorDeep } from 'query-selector-shadow-dom';
-
-// Inspired from https://github.com/focus-trap/tabbable
-const focusables = [
-  'input:not([inert])',
-  'select:not([inert])',
-  'textarea:not([inert])',
-  'a[href]:not([inert])',
-  'button:not([inert])',
-  'label:not([inert])',
-  '[tabindex]:not([inert])',
-  'audio[controls]:not([inert])',
-  'video[controls]:not([inert])',
-  '[contenteditable]:not([contenteditable="false"]):not([inert])',
-  'details>summary:first-of-type:not([inert])',
-  'details:not([inert])',
-  '[focusable]:not([focusable="false"])',
-];
-
-// eslint-disable-next-line no-unused-vars
-const focusableSelector = focusables.join(', ');
+import { computeAccessibleName, computeAccessibleDescription } from 'dom-accessibility-api';
+import { roles, elementRoles } from 'aria-query';
 
 /**
- * Get accessible name for an element, handling web components with shadow DOM
+ * Dispatch text change event to the addon panel
  */
-function computeAccessibleName(element) {
-  if (!element) return '';
-
-  // Priority: aria-label > aria-labelledby > alt > title > text content
-  if (element.getAttribute('aria-label')) {
-    return element.getAttribute('aria-label');
-  }
-
-  const labelledBy = element.getAttribute('aria-labelledby');
-  if (labelledBy && element.ownerDocument) {
-    const labelEl = element.ownerDocument.getElementById(labelledBy);
-    if (labelEl && labelEl.textContent) {
-      return labelEl.textContent.trim();
-    }
-  }
-
-  if (element.getAttribute('alt')) {
-    return element.getAttribute('alt');
-  }
-
-  if (element.getAttribute('title')) {
-    return element.getAttribute('title');
-  }
-
-  // For web components, try to get slotted content or shadow DOM text
-  if (element.shadowRoot) {
-    const slot = element.shadowRoot.querySelector('slot');
-    if (slot) {
-      const assignedNodes = slot.assignedNodes({ flatten: true });
-      const text = assignedNodes
-        .map(node => node.textContent || '')
-        .join('')
-        .trim();
-      if (text) return text;
-    }
-  }
-
-  return (element.textContent || '').trim();
-}
-
 function dispatchTextChanged(text) {
   const evt = new CustomEvent('screen-reader-text-changed', {
     detail: { text },
@@ -70,6 +12,42 @@ function dispatchTextChanged(text) {
   window.dispatchEvent(evt);
 }
 
+/**
+ * Get the implicit ARIA role for an element using aria-query
+ */
+function getImplicitRole(element) {
+  if (!element || !element.tagName) return null;
+
+  const tagName = element.tagName.toLowerCase();
+
+  // Check aria-query's elementRoles map
+  // elementRoles is a Map where keys are objects like { name: 'button' }
+  for (const [key, roleSet] of elementRoles) {
+    if (key.name === tagName) {
+      // Check if attributes match (for elements like input with type)
+      if (key.attributes) {
+        const matches = key.attributes.every(attr => {
+          if (attr.name === 'type') {
+            return element.getAttribute('type') === attr.value;
+          }
+          return element.hasAttribute(attr.name) === (attr.value !== undefined);
+        });
+        if (matches && roleSet.size > 0) {
+          return Array.from(roleSet)[0];
+        }
+      } else if (roleSet.size > 0) {
+        return Array.from(roleSet)[0];
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Screen Reader class that simulates screen reader behavior
+ * Uses dom-accessibility-api for W3C-compliant accessible name computation
+ */
 export default class ScreenReader {
   constructor() {
     this.isRunning = false;
@@ -84,22 +62,28 @@ export default class ScreenReader {
     this.handleMutation = this.onMutation.bind(this);
 
     this.mutationObserver = null;
+    this.liveRegionObserver = null;
   }
 
   /**
-   * Map element to its semantic role
+   * Compute the accessible role for an element
+   * Priority: explicit role > implicit role from aria-query > fallback mapping
    */
   computeRole(element) {
     if (!element) return 'element';
 
-    // Check explicit role first
-    const role = element.getAttribute('role');
-    if (role) return role;
+    // 1. Check explicit ARIA role
+    const explicitRole = element.getAttribute('role');
+    if (explicitRole) return explicitRole;
 
-    // Map by tag name
+    // 2. Try to get implicit role from aria-query
+    const implicitRole = getImplicitRole(element);
+    if (implicitRole) return implicitRole;
+
+    // 3. Fallback mapping for common elements
     const tagName = element.tagName ? element.tagName.toLowerCase() : '';
-    const tagMappings = {
-      a: 'link',
+    const fallbackMappings = {
+      a: element.hasAttribute('href') ? 'link' : 'generic',
       button: 'button',
       input: this.getInputRole(element),
       select: 'combobox',
@@ -111,7 +95,7 @@ export default class ScreenReader {
       h5: 'heading',
       h6: 'heading',
       p: 'paragraph',
-      img: 'image',
+      img: 'img',
       nav: 'navigation',
       main: 'main',
       aside: 'complementary',
@@ -123,29 +107,82 @@ export default class ScreenReader {
       table: 'table',
       details: 'group',
       summary: 'button',
-      label: 'label',
+      label: 'generic',
+      section: element.hasAttribute('aria-label') || element.hasAttribute('aria-labelledby') ? 'region' : 'generic',
+      article: 'article',
+      form: 'form',
+      dialog: 'dialog',
     };
 
-    return tagMappings[tagName] || 'element';
+    return fallbackMappings[tagName] || 'generic';
   }
 
-  // eslint-disable-next-line class-methods-use-this
+  /**
+   * Get role for input elements based on type
+   */
   getInputRole(element) {
-    const type = element.getAttribute('type') || 'text';
+    const type = (element.getAttribute('type') || 'text').toLowerCase();
     const inputRoles = {
       checkbox: 'checkbox',
       radio: 'radio',
       button: 'button',
       submit: 'button',
       reset: 'button',
+      image: 'button',
       range: 'slider',
       search: 'searchbox',
+      email: 'textbox',
+      tel: 'textbox',
+      url: 'textbox',
+      number: 'spinbutton',
+      password: 'textbox',
+      text: 'textbox',
     };
     return inputRoles[type] || 'textbox';
   }
 
   /**
-   * Generate announcement for an element based on its role
+   * Get accessible name using dom-accessibility-api (W3C AccName spec)
+   */
+  getAccessibleName(element) {
+    if (!element) return '';
+
+    try {
+      return computeAccessibleName(element, {
+        // Compute name even for elements that normally wouldn't have one
+        computedStyleSupportsPseudoElements: true,
+      });
+    } catch (e) {
+      // Fallback for Shadow DOM elements that might not work with the library
+      if (element.getAttribute('aria-label')) {
+        return element.getAttribute('aria-label');
+      }
+      if (element.shadowRoot) {
+        const slot = element.shadowRoot.querySelector('slot');
+        if (slot) {
+          const nodes = slot.assignedNodes({ flatten: true });
+          return nodes.map(n => n.textContent || '').join('').trim();
+        }
+      }
+      return (element.textContent || '').trim();
+    }
+  }
+
+  /**
+   * Get accessible description using dom-accessibility-api
+   */
+  getAccessibleDescription(element) {
+    if (!element) return '';
+
+    try {
+      return computeAccessibleDescription(element);
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /**
+   * Generate announcement for an element based on its role and state
    */
   announceElement(element) {
     if (!element || element === this.lastAnnouncedElement) return;
@@ -153,84 +190,237 @@ export default class ScreenReader {
     this.lastAnnouncedElement = element;
 
     const role = this.computeRole(element);
-    const name = computeAccessibleName(element);
+    const name = this.getAccessibleName(element);
+    const description = this.getAccessibleDescription(element);
 
-    const announcements = {
-      link: () => `Link, ${name}. Press Enter to follow.`,
-      button: () => `Button, ${name}. Press Space or Enter to activate.`,
-      checkbox: () => {
-        const checked = element.checked || element.getAttribute('aria-checked') === 'true';
-        return `Checkbox, ${name}, ${checked ? 'checked' : 'not checked'}.`;
-      },
-      radio: () => {
-        const checked = element.checked || element.getAttribute('aria-checked') === 'true';
-        return `Radio button, ${name}, ${checked ? 'selected' : 'not selected'}.`;
-      },
-      switch: () => {
-        const checked = element.getAttribute('aria-checked') === 'true';
-        return `Switch, ${name}, ${checked ? 'on' : 'off'}.`;
-      },
-      textbox: () => {
-        const value = element.value || '';
-        return `Text field, ${name}. ${value ? `Contains: ${value}` : 'Empty.'}`;
-      },
-      searchbox: () => `Search field, ${name}.`,
-      combobox: () => `Dropdown, ${name}. Press Space to open.`,
-      slider: () => {
-        const value = element.value || element.getAttribute('aria-valuenow') || '';
-        return `Slider, ${name}. Value: ${value}.`;
-      },
-      heading: () => {
-        const level =
-          element.getAttribute('aria-level') || (element.tagName ? element.tagName[1] : '1');
-        return `Heading level ${level}, ${name}`;
-      },
-      paragraph: () => name,
-      image: () => `Image, ${name || 'no description'}`,
-      listitem: () => `List item, ${name}`,
-      option: () => {
-        const selected = element.getAttribute('aria-selected') === 'true' || element.selected;
-        return `Option, ${name}${selected ? ', selected' : ''}`;
-      },
-      menuitem: () => `Menu item, ${name}`,
-      tab: () => {
-        const selected = element.getAttribute('aria-selected') === 'true';
-        return `Tab, ${name}${selected ? ', selected' : ''}`;
-      },
-      navigation: () => `Navigation, ${name || 'region'}`,
-      main: () => 'Main content',
-      label: () => name,
-      group: () => (name ? `Group, ${name}` : ''),
-      menu: () => `Menu, ${name}`,
-      list: () => `List, ${name}`,
-    };
+    // Build the announcement based on role
+    let announcement = this.buildRoleAnnouncement(element, role, name);
 
-    const announcement = announcements[role] ? announcements[role]() : name || `${role} element`;
+    // Add description if available
+    if (description) {
+      announcement += ` ${description}`;
+    }
 
     if (announcement) {
       this.say(announcement);
     }
   }
 
+  /**
+   * Build announcement string based on role
+   */
+  buildRoleAnnouncement(element, role, name) {
+    const announcements = {
+      link: () => {
+        const visited = element.matches(':visited') ? 'visited ' : '';
+        return `${visited}Link, ${name || 'unlabeled'}. Press Enter to follow.`;
+      },
+      button: () => {
+        const pressed = element.getAttribute('aria-pressed');
+        const expanded = element.getAttribute('aria-expanded');
+        let state = '';
+        if (pressed === 'true') state = ', pressed';
+        else if (pressed === 'false') state = ', not pressed';
+        if (expanded === 'true') state += ', expanded';
+        else if (expanded === 'false') state += ', collapsed';
+        return `Button, ${name || 'unlabeled'}${state}. Press Space or Enter to activate.`;
+      },
+      checkbox: () => {
+        const checked = element.checked || element.getAttribute('aria-checked') === 'true';
+        const mixed = element.getAttribute('aria-checked') === 'mixed';
+        const state = mixed ? 'partially checked' : checked ? 'checked' : 'not checked';
+        return `Checkbox, ${name || 'unlabeled'}, ${state}. Press Space to toggle.`;
+      },
+      radio: () => {
+        const checked = element.checked || element.getAttribute('aria-checked') === 'true';
+        return `Radio button, ${name || 'unlabeled'}, ${checked ? 'selected' : 'not selected'}.`;
+      },
+      switch: () => {
+        const checked = element.getAttribute('aria-checked') === 'true' || element.checked;
+        return `Switch, ${name || 'unlabeled'}, ${checked ? 'on' : 'off'}. Press Space to toggle.`;
+      },
+      textbox: () => {
+        const value = element.value || '';
+        const required = element.hasAttribute('required') || element.getAttribute('aria-required') === 'true';
+        const invalid = element.getAttribute('aria-invalid') === 'true';
+        const readonly = element.hasAttribute('readonly') || element.getAttribute('aria-readonly') === 'true';
+        let state = '';
+        if (required) state += ', required';
+        if (invalid) state += ', invalid entry';
+        if (readonly) state += ', read only';
+        return `Text field, ${name || 'unlabeled'}${state}. ${value ? `Contains: ${value}` : 'Empty.'}`;
+      },
+      searchbox: () => {
+        const value = element.value || '';
+        return `Search field, ${name || 'unlabeled'}. ${value ? `Contains: ${value}` : 'Empty.'}`;
+      },
+      combobox: () => {
+        const expanded = element.getAttribute('aria-expanded') === 'true';
+        const value = element.value || element.options?.[element.selectedIndex]?.text || '';
+        return `Combo box, ${name || 'unlabeled'}, ${expanded ? 'expanded' : 'collapsed'}. ${value ? `Selected: ${value}` : ''} Press Space to open.`;
+      },
+      listbox: () => {
+        const expanded = element.getAttribute('aria-expanded');
+        let state = '';
+        if (expanded === 'true') state = ', expanded';
+        else if (expanded === 'false') state = ', collapsed';
+        return `List box, ${name || 'unlabeled'}${state}.`;
+      },
+      slider: () => {
+        const value = element.value || element.getAttribute('aria-valuenow') || '';
+        const min = element.min || element.getAttribute('aria-valuemin') || '0';
+        const max = element.max || element.getAttribute('aria-valuemax') || '100';
+        const valueText = element.getAttribute('aria-valuetext') || value;
+        return `Slider, ${name || 'unlabeled'}. Value: ${valueText}. Range: ${min} to ${max}.`;
+      },
+      spinbutton: () => {
+        const value = element.value || element.getAttribute('aria-valuenow') || '';
+        return `Spin button, ${name || 'unlabeled'}. Value: ${value}. Use arrow keys to adjust.`;
+      },
+      heading: () => {
+        const level = element.getAttribute('aria-level') || 
+          (element.tagName ? element.tagName.match(/h(\d)/i)?.[1] : null) || '2';
+        return `Heading level ${level}, ${name}`;
+      },
+      img: () => {
+        if (!name && element.getAttribute('alt') === '') {
+          return ''; // Decorative image, don't announce
+        }
+        return `Image, ${name || 'no description'}`;
+      },
+      figure: () => `Figure, ${name || ''}`,
+      listitem: () => {
+        const list = element.closest('ol, ul, [role="list"]');
+        const items = list ? list.querySelectorAll('li, [role="listitem"]') : [];
+        const index = Array.from(items).indexOf(element) + 1;
+        const total = items.length;
+        return `${name}. List item ${index} of ${total}.`;
+      },
+      option: () => {
+        const selected = element.getAttribute('aria-selected') === 'true' || element.selected;
+        const list = element.closest('[role="listbox"], select');
+        const options = list ? list.querySelectorAll('[role="option"], option') : [];
+        const index = Array.from(options).indexOf(element) + 1;
+        return `${name}${selected ? ', selected' : ''}. Option ${index} of ${options.length}.`;
+      },
+      menuitem: () => `Menu item, ${name}`,
+      menuitemcheckbox: () => {
+        const checked = element.getAttribute('aria-checked') === 'true';
+        return `Menu item checkbox, ${name}, ${checked ? 'checked' : 'not checked'}`;
+      },
+      menuitemradio: () => {
+        const checked = element.getAttribute('aria-checked') === 'true';
+        return `Menu item radio, ${name}, ${checked ? 'selected' : 'not selected'}`;
+      },
+      tab: () => {
+        const selected = element.getAttribute('aria-selected') === 'true';
+        const tablist = element.closest('[role="tablist"]');
+        const tabs = tablist ? tablist.querySelectorAll('[role="tab"]') : [];
+        const index = Array.from(tabs).indexOf(element) + 1;
+        return `Tab, ${name}${selected ? ', selected' : ''}. ${index} of ${tabs.length}.`;
+      },
+      tabpanel: () => `Tab panel, ${name}`,
+      navigation: () => `Navigation${name ? `, ${name}` : ''}`,
+      main: () => `Main content${name ? `, ${name}` : ''}`,
+      banner: () => `Banner${name ? `, ${name}` : ''}`,
+      contentinfo: () => `Content info${name ? `, ${name}` : ''}`,
+      complementary: () => `Complementary${name ? `, ${name}` : ''}`,
+      region: () => `Region, ${name}`,
+      article: () => `Article${name ? `, ${name}` : ''}`,
+      form: () => `Form${name ? `, ${name}` : ''}`,
+      search: () => `Search${name ? `, ${name}` : ''}`,
+      dialog: () => {
+        const modal = element.getAttribute('aria-modal') === 'true';
+        return `${modal ? 'Modal ' : ''}Dialog, ${name || 'unlabeled'}`;
+      },
+      alertdialog: () => `Alert dialog, ${name || 'unlabeled'}`,
+      alert: () => `Alert: ${name}`,
+      status: () => `Status: ${name}`,
+      log: () => `Log: ${name}`,
+      marquee: () => `Marquee: ${name}`,
+      timer: () => `Timer: ${name}`,
+      progressbar: () => {
+        const value = element.getAttribute('aria-valuenow');
+        const valueText = element.getAttribute('aria-valuetext');
+        if (valueText) return `Progress bar, ${name}. ${valueText}`;
+        if (value) return `Progress bar, ${name}. ${value} percent`;
+        return `Progress bar, ${name}. Loading...`;
+      },
+      meter: () => {
+        const value = element.getAttribute('aria-valuenow') || element.value;
+        return `Meter, ${name}. Value: ${value}`;
+      },
+      tooltip: () => `Tooltip: ${name}`,
+      tree: () => `Tree, ${name}`,
+      treeitem: () => {
+        const expanded = element.getAttribute('aria-expanded');
+        const selected = element.getAttribute('aria-selected') === 'true';
+        let state = selected ? ', selected' : '';
+        if (expanded === 'true') state += ', expanded';
+        else if (expanded === 'false') state += ', collapsed';
+        return `Tree item, ${name}${state}`;
+      },
+      grid: () => `Grid, ${name}`,
+      gridcell: () => name,
+      row: () => {
+        const index = element.getAttribute('aria-rowindex');
+        return index ? `Row ${index}, ${name}` : name;
+      },
+      rowheader: () => `Row header, ${name}`,
+      columnheader: () => `Column header, ${name}`,
+      cell: () => name,
+      table: () => {
+        const rows = element.querySelectorAll('tr, [role="row"]').length;
+        const cols = element.querySelector('tr, [role="row"]')?.children.length || 0;
+        return `Table, ${name || 'unlabeled'}. ${rows} rows, ${cols} columns.`;
+      },
+      list: () => {
+        const items = element.querySelectorAll('li, [role="listitem"]').length;
+        return `List${name ? `, ${name}` : ''}. ${items} items.`;
+      },
+      menu: () => `Menu, ${name}`,
+      menubar: () => `Menu bar, ${name}`,
+      toolbar: () => `Toolbar, ${name}`,
+      group: () => name ? `Group, ${name}` : '',
+      separator: () => 'Separator',
+      generic: () => name || '',
+    };
+
+    const announceFn = announcements[role];
+    return announceFn ? announceFn() : (name || `${role}`);
+  }
+
+  /**
+   * Add visual focus indicator styles to the document
+   */
   addStyles() {
     if (!this.storyDocument || !this.storyDocument.head) return;
 
-    // Remove existing styles first
     this.removeStyles();
 
     const styleElement = this.storyDocument.createElement('style');
     styleElement.id = 'screen-reader-addon-styles';
-    styleElement.textContent =
-      '[data-sr-current] { outline: 3px solid #005fcc !important; outline-offset: 2px !important; }';
+    styleElement.textContent = `
+      [data-sr-current] {
+        outline: 3px solid #005fcc !important;
+        outline-offset: 2px !important;
+      }
+    `;
     this.storyDocument.head.appendChild(styleElement);
   }
 
+  /**
+   * Remove visual focus indicator styles
+   */
   removeStyles() {
     if (!this.storyDocument) return;
     const styles = this.storyDocument.getElementById('screen-reader-addon-styles');
     if (styles) styles.remove();
   }
 
+  /**
+   * Speak/display the announcement
+   */
   say(speech) {
     if (!speech) return;
 
@@ -262,7 +452,24 @@ export default class ScreenReader {
   }
 
   /**
-   * Handle focus changes - this is the main way we track where user is
+   * Find the deeply focused element, traversing into shadow DOMs
+   */
+  getDeepActiveElement(root = this.storyDocument) {
+    let active = root.activeElement;
+    
+    // Keep traversing into shadow roots to find the actual focused element
+    while (active && active.shadowRoot && active.shadowRoot.activeElement) {
+      active = active.shadowRoot.activeElement;
+    }
+    
+    return active;
+  }
+
+  /**
+   * Handle focus changes - main way we track navigation
+   * 
+   * Real screen readers announce the actual focused element (often inside shadow DOM).
+   * We traverse into shadow DOM to find the real focused element, just like browsers do.
    */
   onFocusIn(evt) {
     if (!this.isRunning) return;
@@ -270,8 +477,18 @@ export default class ScreenReader {
     const { target } = evt;
     if (!target) return;
 
-    this.updateFocusIndicator(target);
-    this.announceElement(target);
+    // Find the actual focused element (may be deep inside shadow DOM)
+    const deepActive = this.getDeepActiveElement();
+    
+    // Use the deep active element if it has a name, otherwise use the event target
+    const deepName = deepActive ? this.getAccessibleName(deepActive) : '';
+    const deepRole = deepActive ? this.computeRole(deepActive) : 'generic';
+    
+    // Prefer the deep element if it has a meaningful name and role
+    const elementToAnnounce = (deepName && deepRole !== 'generic') ? deepActive : target;
+
+    this.updateFocusIndicator(elementToAnnounce);
+    this.announceElement(elementToAnnounce);
   }
 
   /**
@@ -282,7 +499,6 @@ export default class ScreenReader {
 
     // After arrow key navigation, check if aria-activedescendant changed
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].indexOf(evt.key) !== -1) {
-      // Use setTimeout to let the component update first
       setTimeout(() => {
         this.checkActiveDescendant(evt.target);
       }, 10);
@@ -318,7 +534,7 @@ export default class ScreenReader {
   }
 
   /**
-   * Watch for DOM mutations to catch dynamic focus changes
+   * Watch for DOM mutations to catch dynamic changes
    */
   onMutation(mutations) {
     if (!this.isRunning) return;
@@ -328,6 +544,8 @@ export default class ScreenReader {
       'aria-checked',
       'aria-expanded',
       'aria-activedescendant',
+      'aria-pressed',
+      'aria-invalid',
     ];
 
     mutations.forEach(mutation => {
@@ -341,7 +559,6 @@ export default class ScreenReader {
             target.getAttribute(mutation.attributeName) === 'true' &&
             mutation.attributeName === 'aria-selected'
           ) {
-            // Item was just selected
             this.updateFocusIndicator(target);
             this.announceElement(target);
           }
@@ -350,6 +567,47 @@ export default class ScreenReader {
     });
   }
 
+  /**
+   * Watch for live region updates (aria-live)
+   */
+  onLiveRegionMutation(mutations) {
+    if (!this.isRunning) return;
+
+    mutations.forEach(mutation => {
+      const target = mutation.target;
+
+      // Check if this is inside a live region
+      const liveRegion = target.closest('[aria-live], [role="alert"], [role="status"], [role="log"]');
+      if (!liveRegion) return;
+
+      const politeness = liveRegion.getAttribute('aria-live') || 
+        (liveRegion.getAttribute('role') === 'alert' ? 'assertive' : 'polite');
+
+      // Get the new content
+      let announcement = '';
+      if (mutation.type === 'childList') {
+        mutation.addedNodes.forEach(node => {
+          if (node.textContent) {
+            announcement += node.textContent.trim() + ' ';
+          }
+        });
+      } else if (mutation.type === 'characterData') {
+        announcement = target.textContent || '';
+      }
+
+      if (announcement.trim()) {
+        // For assertive, interrupt current speech
+        if (politeness === 'assertive') {
+          speechSynthesis.cancel();
+        }
+        this.say(announcement.trim());
+      }
+    });
+  }
+
+  /**
+   * Set up mutation observer for aria attribute changes
+   */
   setupMutationObserver() {
     if (!this.storyDocument || !this.storyDocument.body) return;
 
@@ -357,12 +615,35 @@ export default class ScreenReader {
     this.mutationObserver.observe(this.storyDocument.body, {
       attributes: true,
       subtree: true,
-      attributeFilter: ['aria-selected', 'aria-checked', 'aria-expanded', 'aria-activedescendant'],
+      attributeFilter: [
+        'aria-selected',
+        'aria-checked',
+        'aria-expanded',
+        'aria-activedescendant',
+        'aria-pressed',
+        'aria-invalid',
+      ],
     });
   }
 
+  /**
+   * Set up observer for live regions
+   */
+  setupLiveRegionObserver() {
+    if (!this.storyDocument || !this.storyDocument.body) return;
+
+    this.liveRegionObserver = new MutationObserver(this.onLiveRegionMutation.bind(this));
+    this.liveRegionObserver.observe(this.storyDocument.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }
+
+  /**
+   * Start the screen reader
+   */
   start(iframe) {
-    // Find iframe if not provided
     let targetIframe = iframe;
     if (!targetIframe) {
       targetIframe =
@@ -377,7 +658,6 @@ export default class ScreenReader {
       !targetIframe.contentWindow.document ||
       !targetIframe.contentWindow.document.body
     ) {
-      // eslint-disable-next-line no-console
       console.warn('[Screen Reader] Waiting for iframe...');
       setTimeout(() => {
         this.start(targetIframe);
@@ -400,12 +680,13 @@ export default class ScreenReader {
 
     this.addStyles();
 
-    // Listen for focus changes - this is the key!
+    // Listen for focus changes
     this.storyDocument.addEventListener('focusin', this.handleFocusIn, true);
     this.storyDocument.addEventListener('keydown', this.handleKeyDown, true);
 
-    // Set up mutation observer for aria attribute changes
+    // Set up mutation observers
     this.setupMutationObserver();
+    this.setupLiveRegionObserver();
 
     this.isRunning = true;
     this.lastAnnouncedElement = null;
@@ -420,6 +701,9 @@ export default class ScreenReader {
     }
   }
 
+  /**
+   * Stop the screen reader
+   */
   stop() {
     if (!this.isRunning && !this.storyDocument) return;
 
@@ -429,10 +713,15 @@ export default class ScreenReader {
       this.storyDocument.removeEventListener('keydown', this.handleKeyDown, true);
     }
 
-    // Clean up mutation observer
+    // Clean up mutation observers
     if (this.mutationObserver) {
       this.mutationObserver.disconnect();
       this.mutationObserver = null;
+    }
+
+    if (this.liveRegionObserver) {
+      this.liveRegionObserver.disconnect();
+      this.liveRegionObserver = null;
     }
 
     // Remove focus indicator

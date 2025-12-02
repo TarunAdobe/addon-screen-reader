@@ -1,6 +1,6 @@
 {
   "name": "storybook-screen-reader",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A Screen Reader Storybook addon for accessibility testing",
   "keywords": [
     "storybook",
@@ -33,45 +33,20 @@
   "author": "Tarun Tomar",
   "license": "MIT",
   "dependencies": {
-    "@babel/preset-env": "^7.13.8",
-    "@babel/preset-react": "^7.12.13",
     "@storybook/manager-api": "^8.0.0",
-    "@storybook/components": "^8.0.0",
-    "query-selector-shadow-dom": "^0.8.0",
+    "@storybook/core-events": "^8.0.0",
+    "@spectrum-web-components/switch": "^0.42.0",
+    "@spectrum-web-components/theme": "^0.42.0",
+    "@lit/react": "^1.0.0",
+    "lit": "^3.1.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "styled-components": "^6.1.0"
+    "query-selector-shadow-dom": "^1.0.0"
   },
   "devDependencies": {
-    "@babel/cli": "^7.12.10",
-    "@babel/core": "^7.12.10",
-    "@commitlint/cli": "^11.0.0",
-    "@commitlint/config-conventional": "^11.0.0",
-    "eslint": "^7.2.0",
-    "eslint-config-airbnb": "^18.2.1",
-    "eslint-config-prettier": "^7.1.0",
-    "eslint-plugin-import": "^2.22.1",
-    "eslint-plugin-jsx-a11y": "^6.4.1",
-    "eslint-plugin-prettier": "^3.3.0",
-    "eslint-plugin-react": "^7.21.5",
-    "eslint-plugin-react-hooks": "^4.0.0",
-    "husky": "^4.3.6",
-    "lint-staged": "^10.5.3",
-    "prettier": "^2.2.1"
+    "esbuild": "^0.20.0"
   },
   "scripts": {
-    "build": "babel ./src --out-dir ./dist",
-    "test": "echo 'no tests specified'",
-    "lint": "eslint ./",
-    "lint:fix": "npm run lint -- --fix"
-  },
-  "husky": {
-    "hooks": {
-      "pre-commit": "lint-staged",
-      "commit-msg": "commitlint -E HUSKY_GIT_PARAMS"
-    }
-  },
-  "lint-staged": {
-    "*.js": "eslint --cache --fix"
+    "build": "esbuild src/register.js --bundle --outfile=dist/register.js --format=esm --external:@storybook/* --external:react --platform=browser --loader:.js=jsx",
+    "test": "echo 'no tests specified'"
   }
 }
